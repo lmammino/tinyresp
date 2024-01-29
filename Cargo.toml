@@ -1,0 +1,15 @@
+[package]
+name = "tinyresp"
+version = "0.0.1"
+edition = "2021"
+authors = ["Luciano Mammino", "Roberto Gambuzzi"]
+description = "A tiny Rust library implementing the Redis Serialization Protocol (RESP)"
+documentation = "https://docs.rs/tinyresp"
+repository = "https://github.com/lmammino/tinyresp"
+keywords = ["redis"]
+categories = ["api-bindings", "parser-implementations"]
+license = "MIT"
+readme = "README.md"
+
+[dependencies]
+nom = "7.1.3"
