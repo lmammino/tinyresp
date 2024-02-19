@@ -1,5 +1,9 @@
 //! A simple parser for the RESP protocol
 //! Still under heavy  development
+//!
+//! For an overview of the procol check out the official
+//! [Redis SErialization Protocol (RESP) documentation](https://redis.io/topics/protocol)
+
 use nom::{
     bytes::complete::{tag, take, take_while},
     character::complete::{i32, i64, one_of},
