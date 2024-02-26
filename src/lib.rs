@@ -7,16 +7,16 @@
 use nom::{
     branch::alt,
     bytes::complete::{tag, take, take_while},
-    character::complete::{i32, i64, one_of},
-    combinator::{eof, map, verify},
+    character::complete::{digit1, i64, one_of, u32},
+    combinator::{eof, map, opt},
     multi::count,
     number::complete::double,
     sequence::terminated,
     IResult,
 };
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub enum Value<'a> {
     SimpleString(&'a str),
     SimpleError(&'a str),
@@ -28,10 +28,10 @@ pub enum Value<'a> {
     Double(String),
     BigNumber(&'a str),
     BulkError(&'a str),
-    VerbatimString(&'a str),
-    Map(HashMap<&'a str, Value<'a>>),
+    VerbatimString((&'a str, &'a str)),
+    Map((Vec<Value<'a>>, Vec<Value<'a>>)),
     Set(BTreeSet<Value<'a>>),
-    Pushes,
+    Pushes(Vec<Value<'a>>),
 }
 
 pub fn parse_message(input: &str) -> IResult<&str, Value> {
@@ -49,12 +49,19 @@ pub fn parse_value(input: &str) -> IResult<&str, Value> {
         parse_null,
         parse_bool,
         parse_double,
+        parse_bignumber,
+        parse_bulk_error,
+        parse_verbatim_string,
+        parse_map,
+        parse_set,
+        parse_pushes,
     ))(input)
 }
 
-fn u32_or_minus1(input: &str) -> IResult<&str, i32> {
-    let (input, value) = verify(i32, |v| v >= &-1)(input)?;
-    Ok((input, value))
+fn values_sequence(input: &str, multiplier: usize) -> IResult<&str, Vec<Value>> {
+    let (input, length) = terminated(u32, crlf)(input)?;
+    let (input, values) = count(parse_value, length as usize * multiplier)(input)?;
+    Ok((input, values))
 }
 
 fn crlf(input: &str) -> IResult<&str, &str> {
@@ -83,29 +90,32 @@ fn parse_integer(input: &str) -> IResult<&str, Value> {
     Ok((input, Value::Integer(value)))
 }
 
+fn parse_bulk_string_raw(input: &str) -> IResult<&str, &str> {
+    let (input, length) = terminated(u32, crlf)(input)?;
+    let (input, value) = terminated(take(length as usize), crlf)(input)?;
+    Ok((input, value))
+}
+
 fn parse_bulk_string(input: &str) -> IResult<&str, Value> {
     let (input, _) = tag("$")(input)?;
-    let (input, length) = terminated(u32_or_minus1, crlf)(input)?;
-    if length == -1 {
-        return Ok((input, Value::Null));
-    }
-
-    let (input, value) = terminated(take(length as usize), crlf)(input)?;
+    let (input, value) = parse_bulk_string_raw(input)?;
     Ok((input, Value::BulkString(value)))
+}
+
+fn parse_bulk_error(input: &str) -> IResult<&str, Value> {
+    let (input, _) = tag("!")(input)?;
+    let (input, value) = parse_bulk_string_raw(input)?;
+    Ok((input, Value::BulkError(value)))
 }
 
 fn parse_array(input: &str) -> IResult<&str, Value> {
     let (input, _) = tag("*")(input)?;
-    let (input, length) = terminated(u32_or_minus1, crlf)(input)?;
-    if length == -1 {
-        return Ok((input, Value::Null));
-    }
-    let (input, values) = count(parse_value, length as usize)(input)?;
+    let (input, values) = values_sequence(input, 1)?;
     Ok((input, Value::Array(values)))
 }
 
 fn parse_null(input: &str) -> IResult<&str, Value> {
-    let (input, _) = tag("_\r\n")(input)?;
+    let (input, _) = alt((tag("$-1\r\n"), tag("*-1\r\n"), tag("_\r\n")))(input)?;
     Ok((input, Value::Null))
 }
 
@@ -135,6 +145,59 @@ fn parse_double(input: &str) -> IResult<&str, Value> {
 
     let val_as_string = format!("{}", value);
     Ok((input, Value::Double(val_as_string)))
+}
+
+fn plus_or_minus(input: &str) -> IResult<&str, char> {
+    one_of("+-")(input)
+}
+
+fn parse_bignumber(input: &str) -> IResult<&str, Value> {
+    let original_input = input;
+    let (input, _) = tag("(")(input)?;
+    let (input, sign) = opt(plus_or_minus)(input)?;
+    let (input, digits) = terminated(digit1, crlf)(input)?;
+    let num_slice = &original_input[1..digits.len() + if sign.is_some() { 2 } else { 1 }];
+    Ok((input, Value::BigNumber(num_slice)))
+}
+
+fn parse_verbatim_string(input: &str) -> IResult<&str, Value> {
+    let (input, _) = tag("=")(input)?;
+    let (input, length) = terminated(u32, crlf)(input)?;
+    let (input, encoding) = terminated(take(3usize), tag(":"))(input)?;
+    let (input, value) = terminated(take(length as usize - 4usize), crlf)(input)?;
+    Ok((input, Value::VerbatimString((encoding, value))))
+}
+
+fn parse_map(input: &str) -> IResult<&str, Value> {
+    let (input, _) = tag("%")(input)?;
+    let (input, keys_and_values) = values_sequence(input, 2)?;
+
+    let (keys, values) = keys_and_values.into_iter().enumerate().fold(
+        (Vec::new(), Vec::new()),
+        |(mut keys, mut values), (idx, val)| {
+            if idx % 2 == 0 {
+                keys.push(val);
+            } else {
+                values.push(val);
+            }
+
+            (keys, values)
+        },
+    );
+
+    Ok((input, Value::Map((keys, values))))
+}
+
+fn parse_set(input: &str) -> IResult<&str, Value> {
+    let (input, _) = tag("~")(input)?;
+    let (input, values) = values_sequence(input, 1)?;
+    Ok((input, Value::Set(values.into_iter().collect())))
+}
+
+fn parse_pushes(input: &str) -> IResult<&str, Value> {
+    let (input, _) = tag(">")(input)?;
+    let (input, values) = values_sequence(input, 1)?;
+    Ok((input, Value::Pushes(values)))
 }
 
 #[cfg(test)]
@@ -197,6 +260,30 @@ mod tests {
         assert!(parse_message("$-2\r\n").is_err());
         assert!(parse_message("$10\r\n12345\r\n").is_err());
         assert!(parse_message("$10\r\n12345\r\n").is_err());
+    }
+
+    #[test]
+    fn test_parse_bulk_error() {
+        assert!(parse_message("!-1\r\n").is_err());
+
+        assert_eq!(
+            parse_message("!21\r\nSYNTAX invalid syntax\r\n"),
+            Ok(("", Value::BulkError("SYNTAX invalid syntax")))
+        );
+
+        assert_eq!(
+            parse_message("!5\r\nhello\r\n"),
+            Ok(("", Value::BulkError("hello")))
+        );
+        assert_eq!(parse_message("!0\r\n\r\n"), Ok(("", Value::BulkError(""))));
+
+        assert_eq!(
+            parse_message("!10\r\nhello\r\nfoo\r\n"),
+            Ok(("", Value::BulkError("hello\r\nfoo")))
+        );
+        assert!(parse_message("!-2\r\n").is_err());
+        assert!(parse_message("!10\r\n12345\r\n").is_err());
+        assert!(parse_message("!10\r\n12345\r\n").is_err());
     }
 
     #[test]
@@ -301,6 +388,93 @@ mod tests {
         assert_eq!(
             parse_message(",nan\r\n"),
             Ok(("", Value::Double("NaN".to_string())))
+        );
+    }
+
+    #[test]
+    fn test_bignumber() {
+        assert_eq!(
+            parse_message("(3492890328409238509324850943850943825024385\r\n"),
+            Ok((
+                "",
+                Value::BigNumber("3492890328409238509324850943850943825024385")
+            ))
+        );
+        assert_eq!(
+            parse_message("(+3492890328409238509324850943850943825024385\r\n"),
+            Ok((
+                "",
+                Value::BigNumber("+3492890328409238509324850943850943825024385")
+            ))
+        );
+        assert_eq!(
+            parse_message("(-3492890328409238509324850943850943825024385\r\n"),
+            Ok((
+                "",
+                Value::BigNumber("-3492890328409238509324850943850943825024385")
+            ))
+        );
+        assert!(parse_message("(+1234-1234\r\n").is_err());
+    }
+
+    #[test]
+    fn test_verbatim_string() {
+        assert_eq!(
+            parse_message("=15\r\ntxt:Some string\r\n"),
+            Ok(("", Value::VerbatimString(("txt", "Some string"))))
+        );
+        assert_eq!(
+            parse_message("=5\r\ntxt:1\r\n"),
+            Ok(("", Value::VerbatimString(("txt", "1"))))
+        );
+        assert_eq!(
+            parse_message("=5\r\nraw:1\r\n"),
+            Ok(("", Value::VerbatimString(("raw", "1"))))
+        );
+        assert!(parse_message("=5\r\nraw:1\r\nTHIS_SHOULD_NOT_BE_HERE").is_err());
+    }
+
+    #[test]
+    fn test_map() {
+        assert_eq!(
+            parse_message("%2\r\n+first\r\n:1\r\n+second\r\n:2\r\n"),
+            Ok((
+                "",
+                Value::Map((
+                    vec![Value::SimpleString("first"), Value::SimpleString("second")],
+                    vec![Value::Integer(1), Value::Integer(2)]
+                ))
+            ))
+        );
+    }
+
+    #[test]
+    fn test_set() {
+        assert_eq!(
+            parse_message("~3\r\n:1\r\n:2\r\n:3\r\n"),
+            Ok((
+                "",
+                Value::Set(
+                    vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)]
+                        .into_iter()
+                        .collect()
+                )
+            ))
+        );
+    }
+
+    #[test]
+    fn test_pushes() {
+        assert_eq!(
+            parse_message(">3\r\n:1\r\n:2\r\n:3\r\n"),
+            Ok((
+                "",
+                Value::Pushes(vec![
+                    Value::Integer(1),
+                    Value::Integer(2),
+                    Value::Integer(3)
+                ])
+            ))
         );
     }
 }
