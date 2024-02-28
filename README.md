@@ -1,6 +1,7 @@
 # tinyresp
 
 [![Build Status](https://github.com/lmammino/tinyresp/actions/workflows/rust.yml/badge.svg)](https://github.com/lmammino/tinyresp/actions/workflows/rust.yml)
+[![codecov](https://codecov.io/gh/lmammino/tinyresp/graph/badge.svg?token=2a5OOr6Um4)](https://codecov.io/gh/lmammino/tinyresp)
 [![Crates.io](https://img.shields.io/crates/v/tinyresp.svg)](https://crates.io/crates/tinyresp)
 [![docs.rs](https://docs.rs/tinyresp/badge.svg)](https://docs.rs/tinyresp)
 
