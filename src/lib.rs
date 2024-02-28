@@ -1,8 +1,26 @@
-//! A simple parser for the RESP protocol
-//! Still under heavy  development
+//! A simple parser for the RESP protocol (REdis Serialization Protocol).
 //!
 //! For an overview of the procol check out the official
 //! [Redis SErialization Protocol (RESP) documentation](https://redis.io/topics/protocol)
+//!
+//! This library is written using [`nom`](https://crates.io/crates/nom) and therefore uses an incremental parsing approach.
+//! This means that using the [`parse`] method will return a `Result` containing a tuple with 2 elements:
+//! - The remaining input (which can be an empty string if the message was fully parsed)
+//! - The parsed value (if the message was fully parsed)
+//!
+//! # Example
+//!
+//! ```
+//! use tinyresp::{parse_message, Value};
+//!
+//! let message = "*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n";
+//! let (remaining_input, value) = parse_message(message).unwrap();
+//! assert_eq!(remaining_input, "");
+//! assert_eq!(value, Value::Array(vec![
+//!     Value::BulkString("hello"),
+//!     Value::BulkString("world")
+//! ]));
+//! ```
 
 use nom::{
     branch::alt,
@@ -14,32 +32,42 @@ use nom::{
     sequence::terminated,
     IResult,
 };
-use std::collections::BTreeSet;
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
-pub enum Value<'a> {
-    SimpleString(&'a str),
-    SimpleError(&'a str),
-    Integer(i64),
-    BulkString(&'a str),
-    Array(Vec<Value<'a>>),
-    Null,
-    Boolean(bool),
-    Double(String),
-    BigNumber(&'a str),
-    BulkError(&'a str),
-    VerbatimString((&'a str, &'a str)),
-    Map((Vec<Value<'a>>, Vec<Value<'a>>)),
-    Set(BTreeSet<Value<'a>>),
-    Pushes(Vec<Value<'a>>),
-}
+mod value;
+pub use value::*;
 
+/// Parses a RESP message using an incremental parsing approach.
+/// This means that the parser will return a `Result` containing a tuple with 2 elements:
+/// - The remaining input (which can be an empty string if the message was fully parsed)
+/// - The parsed value (if the message was fully parsed)
+///
+/// # Example
+///
+/// ```
+/// use tinyresp::{parse_message, Value};
+///
+/// let message = "*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n";
+/// let (remaining_input, value) = parse_message(message).unwrap();
+/// assert_eq!(remaining_input, "");
+/// assert_eq!(value, Value::Array(vec![
+///     Value::BulkString("hello"),
+///     Value::BulkString("world")
+/// ]));
+/// ```
 pub fn parse_message(input: &str) -> IResult<&str, Value> {
     let (input, value) = terminated(parse_value, eof)(input)?;
     Ok((input, value))
 }
 
-pub fn parse_value(input: &str) -> IResult<&str, Value> {
+/// Parses a RESP message and returns the parsed value.
+/// This is a convenience function that uses `parse_message` internally and returns the parsed value.
+/// To get better error reporting and be able to check if there's unparsed data, use [`parse_message`] instead.
+pub fn parse(input: &str) -> Result<Value, String> {
+    let (_, value) = parse_message(input).map_err(|e| format!("{}", e))?;
+    Ok(value)
+}
+
+fn parse_value(input: &str) -> IResult<&str, Value> {
     alt((
         parse_simple_string,
         parse_simple_error,
@@ -165,7 +193,7 @@ fn parse_verbatim_string(input: &str) -> IResult<&str, Value> {
     let (input, length) = terminated(u32, crlf)(input)?;
     let (input, encoding) = terminated(take(3usize), tag(":"))(input)?;
     let (input, value) = terminated(take(length as usize - 4usize), crlf)(input)?;
-    Ok((input, Value::VerbatimString((encoding, value))))
+    Ok((input, Value::VerbatimString(encoding, value)))
 }
 
 fn parse_map(input: &str) -> IResult<&str, Value> {
@@ -185,7 +213,7 @@ fn parse_map(input: &str) -> IResult<&str, Value> {
         },
     );
 
-    Ok((input, Value::Map((keys, values))))
+    Ok((input, Value::Map(keys, values)))
 }
 
 fn parse_set(input: &str) -> IResult<&str, Value> {
@@ -421,15 +449,15 @@ mod tests {
     fn test_verbatim_string() {
         assert_eq!(
             parse_message("=15\r\ntxt:Some string\r\n"),
-            Ok(("", Value::VerbatimString(("txt", "Some string"))))
+            Ok(("", Value::VerbatimString("txt", "Some string")))
         );
         assert_eq!(
             parse_message("=5\r\ntxt:1\r\n"),
-            Ok(("", Value::VerbatimString(("txt", "1"))))
+            Ok(("", Value::VerbatimString("txt", "1")))
         );
         assert_eq!(
             parse_message("=5\r\nraw:1\r\n"),
-            Ok(("", Value::VerbatimString(("raw", "1"))))
+            Ok(("", Value::VerbatimString("raw", "1")))
         );
         assert!(parse_message("=5\r\nraw:1\r\nTHIS_SHOULD_NOT_BE_HERE").is_err());
     }
@@ -440,10 +468,10 @@ mod tests {
             parse_message("%2\r\n+first\r\n:1\r\n+second\r\n:2\r\n"),
             Ok((
                 "",
-                Value::Map((
+                Value::Map(
                     vec![Value::SimpleString("first"), Value::SimpleString("second")],
                     vec![Value::Integer(1), Value::Integer(2)]
-                ))
+                )
             ))
         );
     }
@@ -476,5 +504,18 @@ mod tests {
                 ])
             ))
         );
+    }
+
+    #[test]
+    fn test_parse() {
+        let message = "*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n";
+        let value = parse(message).unwrap();
+        assert_eq!(
+            value,
+            Value::Array(vec![Value::BulkString("hello"), Value::BulkString("world")])
+        );
+
+        let message = "BOGUS";
+        assert!(parse(message).is_err());
     }
 }
