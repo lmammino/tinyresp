@@ -1,6 +1,6 @@
 [package]
 name = "tinyresp"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 authors = ["Luciano Mammino", "Roberto Gambuzzi"]
 description = "A tiny Rust library implementing the Redis Serialization Protocol (RESP)"

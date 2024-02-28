@@ -75,7 +75,7 @@ dependencies = [
 
 [[package]]
 name = "tinyresp"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "nom",
  "thiserror",
