@@ -6,15 +6,31 @@
 
 A tiny Rust library implementing the Redis Serialization Protocol (RESP)
 
-> ⚠️ **WARNING**: This library is still under heavy development and it is not ready for production use yet
-
 <!-- cargo-sync-readme start -->
 
-A simple parser for the RESP protocol
-Still under heavy  development
+A simple parser for the RESP protocol (REdis Serialization Protocol).
 
 For an overview of the procol check out the official
 [Redis SErialization Protocol (RESP) documentation](https://redis.io/topics/protocol)
+
+This library is written using [`nom`](https://crates.io/crates/nom) and therefore uses an incremental parsing approach.
+This means that using the [`parse`] method will return a `Result` containing a tuple with 2 elements:
+- The remaining input (which can be an empty string if the message was fully parsed)
+- The parsed value (if the message was fully parsed)
+
+# Example
+
+```rust
+use tinyresp::{parse_message, Value};
+
+let message = "*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n";
+let (remaining_input, value) = parse_message(message).unwrap();
+assert_eq!(remaining_input, "");
+assert_eq!(value, Value::Array(vec![
+    Value::BulkString("hello"),
+    Value::BulkString("world")
+]));
+```
 
 <!-- cargo-sync-readme end -->
 
