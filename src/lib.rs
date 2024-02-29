@@ -10,17 +10,18 @@
 //!
 //! # Example
 //!
-/// ```
-/// use tinyresp::{parse_value, Value};
-///
-/// let message = "*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n";
-/// let (remaining_input, value) = parse_value(message).unwrap();
-/// assert_eq!(remaining_input, "");
-/// assert_eq!(value, Value::Array(vec![
-///     Value::BulkString("hello"),
-///     Value::BulkString("world")
-/// ]));
-/// ```
+//! ```
+//! use tinyresp::{parse_value, Value};
+//!
+//! let message = "*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n";
+//! let (remaining_input, value) = parse_value(message).unwrap();
+//! assert_eq!(remaining_input, "");
+//! assert_eq!(value, Value::Array(vec![
+//!     Value::BulkString("hello"),
+//!     Value::BulkString("world")
+//! ]));
+//! ```
+
 use nom::{
     branch::alt,
     bytes::complete::{tag, take, take_while},
