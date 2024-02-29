@@ -120,6 +120,18 @@ impl<'a> Value<'a> {
         self.is_array() || self.is_pushes()
     }
 
+    /// Helper method to check if the current value is an error
+    /// type ([Value::SimpleError] or [Value::BulkError]).
+    pub fn is_err(&self) -> bool {
+        self.is_simple_error() || self.is_bulk_error()
+    }
+
+    /// Helper method to check if the current value is not an error
+    /// (basically a negation of the result of [Value::is_err]).
+    pub fn is_ok(&self) -> bool {
+        !self.is_err()
+    }
+
     /// Helper method that tries to get a string reference from the current value.
     /// This will return `Some(&str)` for [Value::SimpleString], [Value::SimpleError], [Value::BulkString],
     /// [Value::BulkError], [Value::Double], [Value::BigNumber], and [Value::VerbatimString].
@@ -394,6 +406,41 @@ mod tests {
         // not an array-like
         let value = Value::SimpleString("hello");
         assert!(!value.is_array_like());
+    }
+
+    #[test]
+    fn test_is_err() {
+        let value = Value::SimpleError("hello");
+        assert!(value.is_err());
+
+        let value = Value::BulkError("hello");
+        assert!(value.is_err());
+
+        // not an error
+        let value = Value::SimpleString("hello");
+        assert!(!value.is_err());
+    }
+
+    #[test]
+    fn test_is_ok() {
+        let value = Value::SimpleString("hello");
+        assert!(value.is_ok());
+
+        let value = Value::BulkString("hello");
+        assert!(value.is_ok());
+
+        let value = Value::Double("3.14".to_string());
+        assert!(value.is_ok());
+
+        let value = Value::BigNumber("1234567890");
+        assert!(value.is_ok());
+
+        let value = Value::VerbatimString("txt", "hello");
+        assert!(value.is_ok());
+
+        // not an ok
+        let value = Value::SimpleError("hello");
+        assert!(!value.is_ok());
     }
 
     #[test]
