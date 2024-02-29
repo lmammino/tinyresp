@@ -10,18 +10,17 @@
 //!
 //! # Example
 //!
-//! ```
-//! use tinyresp::{parse_message, Value};
-//!
-//! let message = "*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n";
-//! let (remaining_input, value) = parse_message(message).unwrap();
-//! assert_eq!(remaining_input, "");
-//! assert_eq!(value, Value::Array(vec![
-//!     Value::BulkString("hello"),
-//!     Value::BulkString("world")
-//! ]));
-//! ```
-
+/// ```
+/// use tinyresp::{parse_value, Value};
+///
+/// let message = "*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n";
+/// let (remaining_input, value) = parse_value(message).unwrap();
+/// assert_eq!(remaining_input, "");
+/// assert_eq!(value, Value::Array(vec![
+///     Value::BulkString("hello"),
+///     Value::BulkString("world")
+/// ]));
+/// ```
 use nom::{
     branch::alt,
     bytes::complete::{tag, take, take_while},
@@ -36,7 +35,30 @@ use nom::{
 mod value;
 pub use value::*;
 
-/// Parses a RESP message using an incremental parsing approach.
+/// Parses a complete RESP message using an incremental parsing approach.
+/// This parser makes sure that the input is fully consumed and returns an error if there is any leftover input.
+///
+/// In case of success it returns an [`Result::Ok`] containing a tuple with 2 elements:
+/// - The remaining input (which will always be an empty string slice)
+/// - The parsed value (if the message was fully parsed)
+///
+/// This function is exposed only for advanced use cases, for instance if you need to combine this parser with other nom parsers.
+/// Most of the times you will want to use the [`parse`] function for one-shot parsing or the [`parse_value`] function for incremental parsing.
+pub fn parse_message(input: &str) -> IResult<&str, Value> {
+    let (input, value) = terminated(parse_value, eof)(input)?;
+    Ok((input, value))
+}
+
+/// A convenience function that parses a complete RESP message and returns the parsed value only.
+/// It internally uses [`parse_message`] and returns the parsed value directly (or an error).
+/// This function will return an error if you have any leftover input because [`parse_message`] makes sure you consume
+/// all the input. If you want to use an incremental approach, you are recommended to use [`parse_value`] instead.
+pub fn parse(input: &str) -> Result<Value, String> {
+    let (_, value) = parse_message(input).map_err(|e| format!("{}", e))?;
+    Ok(value)
+}
+
+/// Parses a RESP value using an incremental parsing approach.
 /// This means that the parser will return a `Result` containing a tuple with 2 elements:
 /// - The remaining input (which can be an empty string if the message was fully parsed)
 /// - The parsed value (if the message was fully parsed)
@@ -44,30 +66,17 @@ pub use value::*;
 /// # Example
 ///
 /// ```
-/// use tinyresp::{parse_message, Value};
+/// use tinyresp::{parse_value, Value};
 ///
 /// let message = "*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n";
-/// let (remaining_input, value) = parse_message(message).unwrap();
+/// let (remaining_input, value) = parse_value(message).unwrap();
 /// assert_eq!(remaining_input, "");
 /// assert_eq!(value, Value::Array(vec![
 ///     Value::BulkString("hello"),
 ///     Value::BulkString("world")
 /// ]));
 /// ```
-pub fn parse_message(input: &str) -> IResult<&str, Value> {
-    let (input, value) = terminated(parse_value, eof)(input)?;
-    Ok((input, value))
-}
-
-/// Parses a RESP message and returns the parsed value.
-/// This is a convenience function that uses `parse_message` internally and returns the parsed value.
-/// To get better error reporting and be able to check if there's unparsed data, use [`parse_message`] instead.
-pub fn parse(input: &str) -> Result<Value, String> {
-    let (_, value) = parse_message(input).map_err(|e| format!("{}", e))?;
-    Ok(value)
-}
-
-fn parse_value(input: &str) -> IResult<&str, Value> {
+pub fn parse_value(input: &str) -> IResult<&str, Value> {
     alt((
         parse_simple_string,
         parse_simple_error,

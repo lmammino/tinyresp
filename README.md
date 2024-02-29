@@ -21,17 +21,6 @@ This means that using the [`parse`] method will return a `Result` containing a t
 
 # Example
 
-```rust
-use tinyresp::{parse_message, Value};
-
-let message = "*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n";
-let (remaining_input, value) = parse_message(message).unwrap();
-assert_eq!(remaining_input, "");
-assert_eq!(value, Value::Array(vec![
-    Value::BulkString("hello"),
-    Value::BulkString("world")
-]));
-```
 
 <!-- cargo-sync-readme end -->
 
